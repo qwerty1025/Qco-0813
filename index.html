@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>風味旅人 | 咖啡職人培訓與知識庫</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* 全面替換為思源宋體(明體) */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700;900&display=swap');
+        body { font-family: 'Noto Serif TC', serif; background-color: #e5e5e5; display: flex; justify-content: center; }
+        ::-webkit-scrollbar { width: 0px; height: 0px; background: transparent; }
+        
+        .mobile-container { width: 100%; max-width: 430px; min-height: 100vh; background-color: #fafaf9; position: relative; box-shadow: 0 0 40px rgba(0,0,0,0.1); overflow-x: hidden; }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateX(10px); }
+        .fade-leave-to { position: absolute; transform: translateX(-10px); }
+        
+        .slide-up-enter-active, .slide-up-leave-active { transition: all 0.3s ease-out; }
+        .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
+        .bento-card { @apply bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden; }
+        
+        /* 動態過濾屏蔽動畫 */
+        .muted-day { opacity: 0.3; transform: scale(0.9); pointer-events: none; filter: grayscale(100%); }
+    </style>
+</head>
+<body class="antialiased text-stone-800">
+
+<div id="app" class="mobile-container pb-24">
+    
+    <!-- ================= 頂部品牌與登入區 ================= -->
+    <header class="flex justify-between items-center px-4 py-3 bg-white sticky top-0 z-40 shadow-sm">
+        <div class="font-black text-lg tracking-tight text-stone-800 cursor-pointer flex items-center" @click="currentView = 'courses'">
+            <i class="fas fa-mug-hot text-amber-700 mr-2"></i> 風味旅人
+        </div>
+        <div class="flex items-center">
+            <template v-if="!msj_currentUser">
+                <button @click="showLoginModal = true" class="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-200">登入 / 註冊</button>
+            </template>
+            <template v-else>
+                <div class="flex items-center space-x-2">
+                    <span class="text-[10px] font-bold text-stone-400 max-w-[60px] truncate">{{ msj_currentUser.name }}</span>
+                    <button v-if="msj_currentUser.role === 'admin'" @click="currentView = 'admin'" class="text-xs bg-stone-800 text-white px-2 py-1 rounded">後台</button>
+                    <button @click="currentView = 'memberCenter'" class="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded font-bold">會員</button>
+                    <button @click="logout" class="text-stone-400 text-sm pl-2 border-l border-stone-200"><i class="fas fa-sign-out-alt"></i></button>
+                </div>
+            </template>
+        </div>
+    </header>
+
+    <!-- ================= 前台：首頁展示與導覽 ================= -->
+    <main v-if="['courses', 'calendar', 'companion', 'props'].includes(currentView)">
+        
+        <!-- 自動旋轉：職人知識卡牌 (復刻完美版) -->
+        <section class="bg-stone-900 text-white py-4 px-6 relative overflow-hidden" @mouseenter="pauseCarousel" @mouseleave="startCarousel" @touchstart="pauseCarousel" @touchend="startCarousel">
+            <!-- 左右控制按鈕 -->
+            <button @click.stop="prevCard" class="absolute left-1 top-1/2 -translate-y-1/2 bg-white/20 text-white rounded-full w-5 h-5 flex items-center justify-center z-10 hover:bg-white/40 backdrop-blur"><i class="fas fa-chevron-left text-[8px]"></i></button>
+            <button @click.stop="nextCard" class="absolute right-1 top-1/2 -translate-y-1/2 bg-white/20 text-white rounded-full w-5 h-5 flex items-center justify-center z-10 hover:bg-white/40 backdrop-blur"><i class="fas fa-chevron-right text-[8px]"></i></button>
+            
+            <div class="flex justify-between items-center mb-2 pl-2 pr-2">
+                <h2 class="text-[10px] font-bold text-amber-500 tracking-widest"><i class="fas fa-lightbulb mr-1"></i> 職人實作筆記</h2>
+                <div class="flex space-x-1">
+                    <span v-for="(article, index) in articles" :key="index" class="w-1.5 h-1.5 rounded-full transition-colors" :class="currentArticleIndex === index ? 'bg-amber-500' : 'bg-stone-600'"></span>
+                </div>
+            </div>
+            
+            <div class="relative min-h-[75px] flex items-center pl-2 pr-2">
+                <transition name="fade">
+                    <div :key="currentArticleIndex" class="w-full">
+                        <div class="flex justify-between items-start mb-1">
+                            <h3 class="text-sm font-bold flex items-center">
+                                <span class="mr-1">{{ articles[currentArticleIndex].icon }}</span> {{ articles[currentArticleIndex].title }}
+                            </h3>
+                            <span v-if="articles[currentArticleIndex].isPremium" class="text-[9px] bg-amber-600/30 text-amber-400 px-1.5 py-0.5 rounded flex items-center"><i class="fas fa-lock text-[8px] mr-1"></i>學員解鎖</span>
+                        </div>
+                        <p class="text-stone-400 text-xs leading-relaxed line-clamp-2 mb-2">{{ articles[currentArticleIndex].summary }}</p>
+                        <button @click="openArticle(articles[currentArticleIndex])" class="text-[10px] text-amber-500 font-bold hover:text-amber-400">閱讀全文 ➔</button>
+                    </div>
+                </transition>
+            </div>
+        </section>
+
+        <!-- 分類導覽列 (4板塊) -->
+        <div class="bg-stone-50 border-b border-stone-200 px-4 pt-3 pb-0 sticky top-[52px] z-30">
+            <div class="flex space-x-4 overflow-x-auto no-scrollbar pb-2">
+                <button @click="currentView = 'courses'" :class="['pb-2 text-sm font-bold relative transition-colors whitespace-nowrap', currentView === 'courses' ? 'text-amber-700' : 'text-stone-400']">找課程<span v-if="currentView === 'courses'" class="absolute bottom-0 left-0 w-full h-0.5 bg-amber-600 rounded-t"></span></button>
+                <button @click="currentView = 'calendar'" :class="['pb-2 text-sm font-bold relative transition-colors whitespace-nowrap', currentView === 'calendar' ? 'text-amber-700' : 'text-stone-400']">看日曆<span v-if="currentView === 'calendar'" class="absolute bottom-0 left-0 w-full h-0.5 bg-amber-600 rounded-t"></span></button>
+                <button @click="currentView = 'companion'" :class="['pb-2 text-sm font-bold relative transition-colors whitespace-nowrap', currentView === 'companion' ? 'text-purple-700' : 'text-stone-400']">風味感官陪跑班<span v-if="currentView === 'companion'" class="absolute bottom-0 left-0 w-full h-0.5 bg-purple-600 rounded-t"></span></button>
+                <button @click="currentView = 'props'" :class="['pb-2 text-sm font-bold relative transition-colors whitespace-nowrap', currentView === 'props' ? 'text-amber-700' : 'text-stone-400']">教具百寶箱<span v-if="currentView === 'props'" class="absolute bottom-0 left-0 w-full h-0.5 bg-amber-600 rounded-t"></span></button>
+            </div>
+        </div>
+
+        <div class="p-4 bg-stone-100 min-h-[60vh]">
+            
+            <!-- 1. 找課程 (常態課程) -->
+            <div v-show="currentView === 'courses'" class="space-y-4 animate-fade-in">
+                <div v-for="course in msj_courses.filter(c => c.type === 'regular')" :key="course.id" class="bento-card">
+                    <div class="relative h-40 bg-stone-200 overflow-hidden" @click="nextCourseImg(course)">
+                        <img :src="getCurrentCourseImg(course).url" class="w-full h-full object-cover transition-all duration-300">
+                        <span class="absolute top-2 left-2 bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold shadow">{{ course.tag }}</span>
+                        <div class="absolute bottom-2 left-0 w-full flex justify-center space-x-1">
+                            <span v-for="(img, idx) in course.images.filter(i=>i.url)" :key="idx" :class="['w-1.5 h-1.5 rounded-full', (course._imgIdx || 0) === idx ? 'bg-white' : 'bg-white/50']"></span>
+                        </div>
+                        <div class="absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">{{ getCurrentCourseImg(course).desc }}</div>
+                    </div>
+                    <div class="p-4">
+                        <h3 class="text-base font-bold text-stone-900 leading-tight mb-1">{{ course.title }}</h3>
+                        <p class="text-[11px] font-bold text-amber-700 mb-2"><i class="far fa-calendar-alt"></i> {{ course.date }}</p>
+                        <p class="text-xs text-stone-500 mb-3 line-clamp-2">{{ course.desc }}</p>
+                        <div class="flex justify-between items-end">
+                            <p class="text-sm font-black text-amber-700">NT$ {{ course.price.toLocaleString() }}</p>
+                            <button @click="openBookingModal(course)" class="text-xs font-bold px-4 py-2 rounded-lg bg-stone-900 text-white hover:bg-amber-700">預約報名</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 風味感官陪跑班 -->
+            <div v-show="currentView === 'companion'" class="space-y-4 animate-fade-in">
+                <div class="bg-purple-50 border border-purple-200 p-4 rounded-2xl">
+                    <h3 class="font-black text-purple-900 text-lg mb-2"><i class="fas fa-route mr-1"></i> 風味感官陪跑班</h3>
+                    <p class="text-xs text-purple-800 mb-3 leading-relaxed">一對一到府風味校正。透過導覽列勾選您方便的時段，系統將自動篩選符合的日期：</p>
+                    
+                    <!-- 時段過濾器與說明 -->
+                    <div class="flex flex-col gap-2 bg-white p-3 rounded-xl border border-purple-100 shadow-sm">
+                        <label class="flex items-center text-xs font-bold text-stone-700 cursor-pointer">
+                            <input type="checkbox" v-model="companionFilter.A" class="mr-2 text-purple-600 focus:ring-purple-500 w-4 h-4 rounded">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 mr-2 shadow-sm"></span> (A) 10:00 ~ 13:00
+                        </label>
+                        <label class="flex items-center text-xs font-bold text-stone-700 cursor-pointer">
+                            <input type="checkbox" v-model="companionFilter.B" class="mr-2 text-purple-600 focus:ring-purple-500 w-4 h-4 rounded">
+                            <span class="w-2.5 h-2.5 rounded-full bg-orange-500 mr-2 shadow-sm"></span> (B) 14:00 ~ 17:00
+                        </label>
+                        <label class="flex items-center text-xs font-bold text-stone-700 cursor-pointer">
+                            <input type="checkbox" v-model="companionFilter.C" class="mr-2 text-purple-600 focus:ring-purple-500 w-4 h-4 rounded">
+                            <span class="w-2.5 h-2.5 rounded-full bg-rose-500 mr-2 shadow-sm"></span> (C) 17:00 ~ 20:00
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 陪跑日曆展示 (動態過濾) -->
+                <div class="bento-card p-4">
+                    <h4 class="font-bold text-stone-800 mb-3 text-sm">8月 可預約日期</h4>
+                    <div class="grid grid-cols-7 text-center gap-y-2 gap-x-1">
+                        <div v-for="d in ['一','二','三','四','五','六','日']" class="text-[10px] font-bold text-stone-400">{{d}}</div>
+                        <div v-for="empty in 5"></div>
+                        <button v-for="day in 31" :key="day" @click="scrollToCompanionList(day)" 
+                                :class="['relative py-2 rounded-xl text-sm font-bold transition-all duration-300', 
+                                         hasCompanionSlots(day) ? 'text-stone-700 bg-stone-50 hover:bg-purple-100 border border-purple-100' : 'text-stone-300',
+                                         !isDayMatchingFilter(day) ? 'muted-day' : '']">
+                            {{ day }}
+                            <div class="flex justify-center gap-[2px] mt-1" v-if="hasCompanionSlots(day)">
+                                <span v-if="msj_companion_schedule[day]?.includes('A')" class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                                <span v-if="msj_companion_schedule[day]?.includes('B')" class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                                <span v-if="msj_companion_schedule[day]?.includes('C')" class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 日期時段清單流水帳 -->
+                <div class="mt-4">
+                    <h4 class="font-bold text-stone-500 text-xs mb-2 pl-1"><i class="fas fa-list-ul mr-1"></i> 開放時段清單</h4>
+                    <div v-for="day in sortedCompanionDays" :key="'list-'+day" :id="'comp-day-'+day" 
+                         v-show="isDayMatchingFilter(day)"
+                         class="bento-card p-4 mb-3 border-l-4 border-l-purple-400 transition-all">
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="font-black text-purple-900 text-base">8月 {{ day }} 日</span>
+                            <span class="text-[10px] bg-purple-100 text-purple-600 px-2 py-1 rounded-full font-bold">主題：風味校正</span>
+                        </div>
+                        <div class="grid grid-cols-1 gap-2">
+                            <button v-for="slot in msj_companion_schedule[day]" :key="slot" 
+                                    v-show="isSlotMatchingFilter(slot)"
+                                    @click="openBookingModal(msj_courses.find(c=>c.type==='companion'), day, slot)" 
+                                    class="w-full flex justify-between items-center p-3 rounded-lg border text-sm font-bold transition hover:shadow-md"
+                                    :class="getSlotStyle(slot)">
+                                <span>{{ getSlotLabel(slot) }}</span>
+                                <span class="text-[10px] bg-white/50 px-2 py-1 rounded">點擊預約</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 看日曆 -->
+            <div v-show="currentView === 'calendar'" class="animate-fade-in space-y-4">
+                <div class="bento-card p-4">
+                    <h3 class="font-black text-lg text-stone-800 mb-4">2026年 8月 (常態課程)</h3>
+                    <div class="grid grid-cols-7 text-center gap-y-2 gap-x-1 mb-2">
+                        <div v-for="d in ['一','二','三','四','五','六','日']" class="text-[10px] font-bold text-stone-400">{{d}}</div>
+                        <div v-for="empty in 5"></div>
+                        <button v-for="day in 31" :key="day" @click="selectDate(day)"
+                                :class="['relative py-2 rounded-xl text-sm font-bold transition-all', selectedDay === day ? 'bg-amber-600 text-white shadow-md' : 'text-stone-700 hover:bg-stone-50']">
+                            {{ day }}
+                            <div v-if="hasRegularCourse(day)" :class="['absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full', selectedDay === day ? 'bg-white' : 'bg-amber-500']"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="border-t border-stone-200 pt-2">
+                    <h4 class="text-xs font-bold text-stone-500 mb-3 pl-1">8月 {{ selectedDay }} 日 行程</h4>
+                    <div v-if="coursesOnSelectedDay.length === 0" class="text-center py-6 text-stone-400 text-xs">當日無常態課程安排</div>
+                    <div v-for="course in coursesOnSelectedDay" :key="'cal-'+course.id" class="bento-card p-3 mb-3 flex flex-col">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="text-[9px] bg-stone-100 border border-stone-200 px-1.5 py-0.5 rounded text-stone-600 font-bold">{{ course.tag }}</span>
+                            <span class="text-[10px] font-bold text-amber-600">{{ course.date }}</span>
+                        </div>
+                        <p class="text-sm font-bold text-stone-800 mb-2">{{ course.title }}</p>
+                        <button @click="openBookingModal(course)" class="w-full text-xs font-bold py-2 rounded-lg bg-stone-900 text-white">立即預約</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. 教具百寶箱 -->
+            <div v-show="currentView === 'props'" class="flex flex-col items-center justify-center py-20 animate-fade-in">
+                <i class="fas fa-box-open text-4xl text-stone-300 mb-3"></i>
+                <p class="font-bold text-stone-500">教具商城建置中</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- ================= 前台：會員中心 (復刻原版) ================= -->
+    <main v-if="currentView === 'memberCenter'" class="p-4 bg-stone-50 min-h-screen">
+        <h2 class="text-xl font-black mb-4 text-stone-900"><i class="fas fa-user-circle mr-2"></i>我的風味旅程</h2>
+        <div class="space-y-4">
+            <div v-if="myOrders.length === 0" class="text-center py-10 text-stone-400 text-sm">目前沒有報名紀錄</div>
+            <div v-for="order in myOrders" :key="order.id" class="bg-white rounded-2xl p-4 shadow-sm border" :class="{'border-red-200': order.state === 'pending', 'border-green-200': order.state === 'confirmed', 'border-stone-200': order.state === 'cancelled'}">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="font-bold text-sm text-stone-900 pr-2">{{ order.courseTitle }}</h3>
+                    <span v-if="order.state === 'pending'" class="bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap">待繳費</span>
+                    <span v-if="order.state === 'verifying'" class="bg-blue-50 text-blue-600 text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap">查核中</span>
+                    <span v-if="order.state === 'confirmed'" class="bg-green-50 text-green-600 text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap">報名成功</span>
+                </div>
+                <p class="text-[10px] text-stone-500 mb-1" v-if="order.isCompanion"><i class="far fa-calendar-check"></i> 預約：{{ order.bookDate }} ({{ order.bookSlot }})</p>
+                <p class="text-xs text-stone-500 mb-3"><i class="fas fa-receipt w-4"></i> NT$ {{ order.amount.toLocaleString() }} (編號: {{ order.id }})</p>
+                
+                <div v-if="order.state === 'pending'" class="bg-stone-50 p-3 rounded-xl border border-stone-200 mt-2">
+                    <p class="text-[10px] font-bold text-stone-700 mb-2">匯款至：玉山銀行(808) 1234-567-890</p>
+                    <div class="flex gap-2">
+                        <input v-model="order.inputLast5" type="text" maxlength="5" placeholder="輸入末五碼" class="w-full p-2 border border-stone-300 rounded text-xs">
+                        <button @click="submitTransfer(order)" class="bg-stone-900 text-white px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap">回報</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ================= 後台：營運管理 ================= -->
+    <main v-if="currentView === 'admin'" class="p-4 bg-stone-900 min-h-screen text-white pb-24">
+        <h2 class="text-lg font-black mb-4"><i class="fas fa-cog mr-2"></i>管理中心</h2>
+        
+        <div class="flex space-x-2 mb-4 overflow-x-auto pb-2 border-b border-stone-700 no-scrollbar">
+            <button @click="adminTab = 'orders'" :class="['px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap', adminTab === 'orders' ? 'bg-amber-600 text-white' : 'bg-stone-800 text-stone-400']">訂單審核</button>
+            <button @click="adminTab = 'courses_reg'" :class="['px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap', adminTab === 'courses_reg' ? 'bg-amber-600 text-white' : 'bg-stone-800 text-stone-400']">常態課程</button>
+            <button @click="adminTab = 'courses_com'" :class="['px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap', adminTab === 'courses_com' ? 'bg-purple-600 text-white' : 'bg-stone-800 text-stone-400']">陪跑排程</button>
+        </div>
+
+        <!-- 訂單審核 -->
+        <div v-show="adminTab === 'orders'" class="space-y-3">
+            <div v-for="order in msj_orders" :key="order.id" @click="openAdminOrderModal(order)" class="bg-stone-800 p-3 rounded-xl border border-stone-700 cursor-pointer">
+                <div class="flex justify-between items-start mb-1">
+                    <div>
+                        <span class="font-black text-sm text-stone-100">{{ order.memberName }}</span>
+                        <p class="text-[10px] text-stone-400 mt-0.5">{{ order.courseTitle }}</p>
+                    </div>
+                    <span :class="['text-[10px] px-1.5 py-0.5 rounded font-bold', order.state === 'verifying' ? 'bg-amber-500 text-stone-900 animate-pulse' : 'bg-stone-700 text-stone-300']">{{ order.state }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 常態課程設定 -->
+        <div v-show="adminTab === 'courses_reg'" class="space-y-3">
+            <div v-for="course in msj_courses.filter(c=>c.type === 'regular')" :key="course.id" class="bg-stone-800 p-3 rounded-xl border border-stone-700">
+                <span class="text-[9px] bg-stone-700 text-amber-400 px-1.5 py-0.5 rounded">{{ course.tag }}</span>
+                <h4 class="font-bold text-stone-100 text-sm mt-1">{{ course.title }}</h4>
+            </div>
+        </div>
+
+        <!-- 陪跑課程設定 (九宮格快捷鍵 + 統計) -->
+        <div v-show="adminTab === 'courses_com'" class="space-y-4">
+            
+            <div class="bg-stone-800 p-4 rounded-xl border border-stone-700">
+                <h4 class="text-sm font-bold text-purple-400 mb-3"><i class="fas fa-bolt mr-1"></i> 快捷排程模組</h4>
+                <!-- 九宮格按鈕 (3欄) -->
+                <div class="grid grid-cols-3 gap-2 mb-4">
+                    <button @click="setAdminQuickMode(['A','B','C'])" :class="getQuickBtnClass(['A','B','C'])">(A)+(B)+(C)</button>
+                    <button @click="setAdminQuickMode(['A','B'])" :class="getQuickBtnClass(['A','B'])">(A)+(B)</button>
+                    <button @click="setAdminQuickMode(['B','C'])" :class="getQuickBtnClass(['B','C'])">(B)+(C)</button>
+                    <button @click="setAdminQuickMode(['A','C'])" :class="getQuickBtnClass(['A','C'])">(A)+(C)</button>
+                    <button @click="setAdminQuickMode(['A'])" :class="getQuickBtnClass(['A'])">(A) 10~13點</button>
+                    <button @click="setAdminQuickMode(['B'])" :class="getQuickBtnClass(['B'])">(B) 14~17點</button>
+                    <button @click="setAdminQuickMode(['C'])" :class="getQuickBtnClass(['C'])">(C) 17~20點</button>
+                    <button @click="setAdminQuickMode([])" :class="['p-2 rounded text-[10px] font-bold border', adminQuickMode.length === 0 ? 'bg-red-900/50 text-red-300 border-red-500' : 'bg-stone-900 text-stone-400 border-stone-700 hover:bg-stone-700']">清除時段</button>
+                </div>
+                
+                <p class="text-[10px] text-stone-400 mb-3 border-b border-stone-700 pb-2">請先點選上方快捷模組，接著點擊下方日期即可一鍵套用。</p>
+                
+                <div class="grid grid-cols-7 text-center gap-1 mb-4">
+                    <div v-for="d in ['一','二','三','四','五','六','日']" class="text-[9px] font-bold text-stone-500 mb-1">{{d}}</div>
+                    <div v-for="empty in 5"></div>
+                    <button v-for="day in 31" :key="day" @click="applyQuickModeToDay(day)" class="relative h-10 rounded-lg text-xs font-bold border border-stone-700 text-stone-300 hover:bg-stone-700 flex flex-col items-center justify-center transition-colors">
+                        <span>{{ day }}</span>
+                        <div class="flex gap-[1px] mt-0.5">
+                            <span v-if="msj_companion_schedule[day]?.includes('A')" class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                            <span v-if="msj_companion_schedule[day]?.includes('B')" class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                            <span v-if="msj_companion_schedule[day]?.includes('C')" class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                        </div>
+                    </button>
+                </div>
+
+                <!-- 統計與流水帳 -->
+                <div class="bg-stone-900 p-3 rounded-lg border border-stone-700">
+                    <div class="flex justify-between items-center mb-2 border-b border-stone-700 pb-2">
+                        <h5 class="text-xs font-bold text-stone-300">本月開放統計</h5>
+                        <div class="text-[10px] font-bold flex gap-2">
+                            <span class="text-amber-400">A: {{ companionStats.A }}</span>
+                            <span class="text-orange-500">B: {{ companionStats.B }}</span>
+                            <span class="text-rose-500">C: {{ companionStats.C }}</span>
+                        </div>
+                    </div>
+                    <div class="max-h-40 overflow-y-auto space-y-1">
+                        <div v-for="day in sortedCompanionDays" :key="'adm-list-'+day" class="text-[10px] text-stone-400 flex justify-between items-center bg-stone-800 p-1.5 rounded">
+                            <span>8/{{ day }}</span>
+                            <span class="font-mono text-purple-300">{{ msj_companion_schedule[day].join(', ') }}</span>
+                        </div>
+                        <div v-if="sortedCompanionDays.length === 0" class="text-center text-[10px] text-stone-500 py-2">尚未開放任何時段</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ================= 互動彈窗區塊 ================= -->
+
+    <!-- 1. 學員報名流程 -->
+    <transition name="slide-up">
+        <div v-if="bookingState.isOpen" class="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60 backdrop-blur-sm">
+            <div class="bg-white w-full max-w-[430px] h-[85vh] rounded-t-3xl shadow-2xl flex flex-col">
+                <div class="flex justify-between items-center p-4 border-b border-stone-100">
+                    <span class="text-sm font-black text-stone-800">預約確認</span>
+                    <button @click="closeBookingModal" class="w-8 h-8 bg-stone-100 text-stone-500 rounded-full flex items-center justify-center"><i class="fas fa-times"></i></button>
+                </div>
+                
+                <div class="p-5 overflow-y-auto pb-20">
+                    <!-- 確認資訊與上課須知 -->
+                    <div v-if="bookingState.step === 1">
+                        <div class="bg-stone-50 p-4 rounded-xl border border-stone-100 mb-4">
+                            <h3 class="font-bold text-stone-900 text-lg mb-1">
+                                {{ bookingState.course.type === 'companion' ? '風味感官陪跑班 - 風味校正' : bookingState.course.title }}
+                            </h3>
+                            <p v-if="bookingState.form.date" class="text-xs text-purple-700 font-bold mb-2"><i class="far fa-calendar-alt"></i> 8/{{ bookingState.form.date }} ({{ getSlotLabel(bookingState.form.slot) }})</p>
+                            <p class="text-sm font-black text-amber-700">應繳金額：NT$ {{ bookingState.course.price.toLocaleString() }}</p>
+                        </div>
+                        
+                        <!-- 陪跑特製表單 -->
+                        <div v-if="bookingState.course.type === 'companion'" class="mb-6 space-y-4 border-l-2 border-purple-400 pl-3">
+                            <div>
+                                <label class="block text-xs font-bold text-stone-700 mb-1">上課地點</label>
+                                <label class="flex items-center mb-2 cursor-pointer">
+                                    <input type="checkbox" v-model="bookingState.form.inStore" class="mr-2 rounded text-purple-600 focus:ring-purple-500 w-4 h-4">
+                                    <span class="text-xs text-stone-600">在店內上課 (qcoffee 工作室)</span>
+                                </label>
+                                <div v-if="!bookingState.form.inStore">
+                                    <input v-model="bookingState.form.address" type="text" placeholder="請簡寫地址及附近地標/店名" class="w-full bg-white border border-stone-300 rounded-lg p-2 text-sm focus:border-purple-500 focus:outline-none">
+                                    <p class="text-[9px] text-rose-500 mt-1 font-bold">* 雙北基桃之外地區，將酌收車馬費另議。</p>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-stone-700 mb-1">其他備註需求</label>
+                                <textarea v-model="bookingState.form.notes" rows="2" class="w-full bg-white border border-stone-300 rounded-lg p-2 text-sm focus:border-purple-500 focus:outline-none" placeholder="想突破的盲點或特殊器材..."></textarea>
+                            </div>
+                        </div>
+
+                        <label class="flex items-start cursor-pointer mb-6">
+                            <input type="checkbox" v-model="bookingState.termsAccepted" class="mt-0.5 mr-2 rounded text-amber-600 focus:ring-amber-500 w-4 h-4">
+                            <span class="text-xs font-bold text-stone-700">我已詳細閱讀並同意上述「上課須知」與退費規則。</span>
+                        </label>
+                        
+                        <button @click="confirmBooking" :disabled="!bookingState.termsAccepted" class="w-full py-3 rounded-xl font-bold transition shadow-md text-sm disabled:opacity-50 disabled:bg-stone-300 disabled:text-stone-500 bg-stone-900 text-white hover:bg-amber-700">
+                            同意並送出報名
+                        </button>
+                    </div>
+
+                    <!-- 報名成功 -->
+                    <div v-if="bookingState.step === 2" class="text-center py-4">
+                        <i class="fas fa-check-circle text-5xl text-green-500 mb-4"></i>
+                        <h3 class="text-xl font-black text-stone-900 mb-2">報名已送出！</h3>
+                        <button @click="goToMemberCenter" class="w-full bg-stone-900 text-white py-3 rounded-xl font-bold text-sm mt-6 shadow-md">
+                            前往報名紀錄
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <!-- 2. 職人實作筆記彈窗 (復刻原版) -->
+    <transition name="slide-up">
+        <div v-if="viewingArticle" class="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 backdrop-blur-sm">
+            <div class="bg-white w-full max-w-[430px] h-[85vh] rounded-t-3xl shadow-2xl flex flex-col">
+                <div class="flex justify-between items-center p-4 border-b border-stone-100 bg-white sticky top-0">
+                    <span class="text-sm font-bold text-stone-500"><i class="fas fa-book-open mr-1"></i> 職人筆記</span>
+                    <button @click="viewingArticle = null; startCarousel()" class="w-8 h-8 bg-stone-100 text-stone-500 rounded-full flex items-center justify-center"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="overflow-y-auto p-6 pb-20">
+                    <div class="text-4xl mb-4">{{ viewingArticle.icon }}</div>
+                    <h2 class="text-2xl font-black text-stone-900 mb-4">{{ viewingArticle.title }}</h2>
+                    <p class="text-sm text-stone-500 font-bold border-l-4 border-stone-200 pl-3 mb-6">{{ viewingArticle.summary }}</p>
+                    
+                    <template v-if="viewingArticle.isPremium && !hasPremiumAccess">
+                        <div class="bg-stone-900 text-white p-6 rounded-2xl text-center mt-8">
+                            <i class="fas fa-lock text-3xl text-amber-500 mb-3 opacity-80"></i>
+                            <h3 class="font-bold text-lg mb-2">深度內容已鎖定</h3>
+                            <p class="text-xs text-stone-400 mb-4">此篇為報名學員限定的高階內容。</p>
+                            <button @click="viewingArticle = null; currentView = 'courses'" class="bg-amber-600 px-4 py-2 rounded-lg text-xs font-bold">報名課程以解鎖</button>
+                        </div>
+                    </template>
+                    <template v-else>
+                        <div class="prose prose-sm max-w-none text-stone-700 whitespace-pre-wrap leading-relaxed">{{ viewingArticle.content }}</div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <!-- 3. 後台訂單審核中心 (簡化) -->
+    <transition name="slide-up">
+        <div v-if="adminOrderState.isOpen" class="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60 backdrop-blur-sm">
+            <div class="bg-stone-900 w-full max-w-[430px] rounded-t-3xl flex flex-col border-t border-stone-700 text-white p-5 pb-10">
+                <h3 class="font-black text-lg mb-2">{{ adminOrderState.order.memberName }}</h3>
+                <p class="text-xs text-stone-400">課程：{{ adminOrderState.order.courseTitle }}</p>
+                <div class="grid grid-cols-2 gap-2 mt-4">
+                    <button @click="adminOrderState.order.state = 'pending'; adminOrderState.isOpen = false" class="py-2 bg-stone-800 rounded text-xs">設為待繳費</button>
+                    <button @click="adminOrderState.order.state = 'confirmed'; adminOrderState.isOpen = false" class="py-2 bg-green-600 rounded text-xs font-bold">確認入帳</button>
+                </div>
+                <button @click="adminOrderState.isOpen = false" class="mt-4 text-xs text-stone-500 w-full py-2">關閉</button>
+            </div>
+        </div>
+    </transition>
+
+    <!-- ================= 登入彈窗 ================= -->
+    <div v-if="showLoginModal" class="absolute inset-0 bg-stone-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full shadow-2xl relative">
+            <button @click="showLoginModal = false" class="absolute top-4 right-4 text-stone-400"><i class="fas fa-times"></i></button>
+            <h2 class="text-lg font-black text-center mb-4">系統模擬登入</h2>
+            <div class="grid grid-cols-2 gap-2">
+                <button @click="login({ id: 'U001', name: '王小明', role: 'member' })" class="bg-stone-50 border border-stone-200 py-2 rounded text-xs font-bold">學員</button>
+                <button @click="login({ id: 'A001', name: '林總監', role: 'admin' })" class="bg-stone-900 text-white py-2 rounded text-xs font-bold">管理員</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // --- Firebase 初始化 (維持 msj_ 規範) ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyALj-w6MSC_5CgGCVUVFveoV8-ykRxcu24",
+        authDomain: "crm-1225-003.firebaseapp.com",
+        databaseURL: "https://crm-1225-003-default-rtdb.firebaseio.com",
+        projectId: "crm-1225-003",
+        storageBucket: "crm-1225-003.firebasestorage.app",
+        messagingSenderId: "566985177794",
+        appId: "1:566985177794:web:fcf21c033bd62c3bd7195b"
+    };
+    firebase.initializeApp(firebaseConfig);
+
+    const { createApp, ref, computed, reactive, onMounted, onUnmounted } = Vue;
+
+    createApp({
+        setup() {
+            // --- 資料庫防污染 (msj_ 前綴) ---
+            const msj_courses = ref([
+                { id: 'msj_c_01', type: 'regular', tag: '新手上路', title: '義式濃縮與基礎奶泡', desc: '學會掌握完美 Espresso 基礎。', date: '08/10 (一) 14:00', price: 2000, images: [{ url: 'https://images.unsplash.com/photo-1511920170033-f8396924c348?w=400&q=80', desc: '實機操作' }, { url: 'https://images.unsplash.com/photo-1497935586351-b67a49e012bf?w=400&q=80', desc: '拉花解析' }] },
+                { id: 'msj_c_02', type: 'companion', tag: '專屬教練', title: '風味感官陪跑班', desc: '針對您的沖煮盲點，給予參數修正建議。', price: 1500, images: [] }
+            ]);
+            const msj_orders = ref([]);
+            const msj_companion_schedule = reactive({
+                '10': ['A', 'B'],
+                '12': ['B', 'C'],
+                '15': ['A', 'B', 'C'],
+                '20': ['A']
+            });
+
+            // --- UI 狀態 ---
+            const msj_currentUser = ref(null);
+            const currentView = ref('courses'); 
+            const showLoginModal = ref(false);
+            const adminTab = ref('courses_com');
+
+            // --- 職人筆記 (復刻原版邏輯 + 箭頭導航) ---
+            const articles = ref([
+                { id: 1, icon: '🌡️', title: '溫度的魔法', summary: '水溫相差1度，酸甜比例大不同。', content: '這裡是一段長篇解析...\n\n在淺焙咖啡的萃取中，水溫是激發花果香氣的關鍵。', isPremium: false },
+                { id: 2, icon: '⚖️', title: '粉水比是玄學嗎', summary: '黃金比例落在1:15，想凸顯果酸可嘗試1:14。', content: '實際上，粉水比應該根據「豆子的烘焙度」與「你想呈現的風味」來決定。', isPremium: false },
+                { id: 3, icon: '🔬', title: 'TDS與萃取率', summary: '透過TDS儀器修正你的沖煮參數，建立穩定出品。', content: '【高階專屬解析】\n\nTDS 是判斷咖啡濃度的客觀指標。通常滴濾咖啡的 TDS 落於 1.15% - 1.45% 之間。', isPremium: true }
+            ]);
+            const currentArticleIndex = ref(0);
+            const viewingArticle = ref(null);
+            let carouselTimer = null;
+            
+            const nextCard = () => { currentArticleIndex.value = (currentArticleIndex.value + 1) % articles.value.length; };
+            const prevCard = () => { currentArticleIndex.value = (currentArticleIndex.value - 1 + articles.value.length) % articles.value.length; };
+            const startCarousel = () => { if (!carouselTimer) carouselTimer = setInterval(nextCard, 3500); };
+            const pauseCarousel = () => { clearInterval(carouselTimer); carouselTimer = null; };
+            const openArticle = (article) => { viewingArticle.value = article; pauseCarousel(); };
+            
+            onMounted(() => { startCarousel(); });
+            onUnmounted(() => { pauseCarousel(); });
+
+            // --- 常態課程功能 ---
+            const selectedDay = ref(10);
+            const selectDate = (day) => { selectedDay.value = day; };
+            const hasRegularCourse = (day) => {
+                const dayStr = day < 10 ? '0' + day : '' + day;
+                return msj_courses.value.some(c => c.type === 'regular' && c.date.startsWith('08/' + dayStr));
+            };
+            const coursesOnSelectedDay = computed(() => {
+                const dayStr = selectedDay.value < 10 ? '0' + selectedDay.value : '' + selectedDay.value;
+                return msj_courses.value.filter(c => c.type === 'regular' && c.date.startsWith('08/' + dayStr));
+            });
+            const getCurrentCourseImg = (course) => {
+                const validImgs = course.images.filter(i => i.url);
+                return validImgs.length ? validImgs[course._imgIdx || 0] : { url: '', desc: '' };
+            };
+            const nextCourseImg = (course) => {
+                const len = course.images.filter(i => i.url).length;
+                if (len > 1) course._imgIdx = ((course._imgIdx || 0) + 1) % len;
+            };
+
+            // --- 陪跑班：前台動態過濾與日曆聯動 ---
+            const companionFilter = reactive({ A: true, B: true, C: true });
+            
+            const hasCompanionSlots = (day) => {
+                return msj_companion_schedule[day] && msj_companion_schedule[day].length > 0;
+            };
+            
+            const isDayMatchingFilter = (day) => {
+                const slots = msj_companion_schedule[day];
+                if (!slots || slots.length === 0) return false;
+                if (companionFilter.A && slots.includes('A')) return true;
+                if (companionFilter.B && slots.includes('B')) return true;
+                if (companionFilter.C && slots.includes('C')) return true;
+                return false;
+            };
+
+            const isSlotMatchingFilter = (slot) => {
+                return companionFilter[slot] === true;
+            };
+
+            const sortedCompanionDays = computed(() => {
+                return Object.keys(msj_companion_schedule)
+                    .map(Number)
+                    .sort((a, b) => a - b);
+            });
+
+            const scrollToCompanionList = (day) => {
+                if (!hasCompanionSlots(day) || !isDayMatchingFilter(day)) return;
+                const el = document.getElementById('comp-day-' + day);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('bg-purple-100');
+                    setTimeout(() => el.classList.remove('bg-purple-100'), 1500);
+                }
+            };
+
+            const getSlotLabel = (slot) => {
+                if (slot === 'A') return '(A) 10:00 - 13:00';
+                if (slot === 'B') return '(B) 14:00 - 17:00';
+                return '(C) 17:00 - 20:00';
+            };
+
+            const getSlotStyle = (slot) => {
+                if (slot === 'A') return 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100';
+                if (slot === 'B') return 'bg-orange-50 text-orange-800 border-orange-200 hover:bg-orange-100';
+                return 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100';
+            };
+
+            // --- 報名與會員功能 ---
+            const myOrders = computed(() => msj_currentUser.value ? msj_orders.value.filter(o => o.memberId === msj_currentUser.value.id).reverse() : []);
+            const hasPremiumAccess = computed(() => msj_currentUser.value && (msj_currentUser.value.role === 'admin' || myOrders.value.length > 0));
+
+            const bookingState = reactive({ isOpen: false, step: 0, course: null, form: {}, termsAccepted: false });
+            
+            const openBookingModal = (course, day = null, slot = null) => {
+                if (!msj_currentUser.value) return (showLoginModal.value = true);
+                bookingState.course = course;
+                // 預設到府 (inStore: false)
+                bookingState.form = { date: day, slot: slot, inStore: false, address: '', notes: '' }; 
+                bookingState.termsAccepted = false;
+                bookingState.step = 1;
+                bookingState.isOpen = true;
+            };
+            const closeBookingModal = () => (bookingState.isOpen = false);
+            
+            const confirmBooking = () => {
+                const isCom = bookingState.course.type === 'companion';
+                msj_orders.value.push({
+                    id: 'msj_ord_' + Date.now().toString().slice(-5),
+                    memberId: msj_currentUser.value.id,
+                    memberName: msj_currentUser.value.name,
+                    courseTitle: isCom ? '風味感官陪跑班 - 風味校正' : bookingState.course.title,
+                    amount: bookingState.course.price,
+                    state: 'pending', last5: '',
+                    isCompanion: isCom,
+                    bookDate: isCom ? `08/${bookingState.form.date}` : null,
+                    bookSlot: isCom ? getSlotLabel(bookingState.form.slot) : null
+                });
+                bookingState.step = 2;
+            };
+
+            const goToMemberCenter = () => { closeBookingModal(); currentView.value = 'memberCenter'; };
+            const login = (u) => { msj_currentUser.value = u; currentView.value = u.role === 'admin' ? 'admin' : 'memberCenter'; showLoginModal.value = false; };
+            const logout = () => { msj_currentUser.value = null; currentView.value = 'courses'; };
+
+            // --- 後台：陪跑快捷排程模組 ---
+            const adminQuickMode = ref(['A', 'B', 'C']); // 預設選中 A+B+C
+            
+            const setAdminQuickMode = (arr) => {
+                adminQuickMode.value = arr;
+            };
+            
+            const getQuickBtnClass = (arr) => {
+                const isMatch = JSON.stringify(adminQuickMode.value.sort()) === JSON.stringify(arr.sort());
+                return ['p-2 rounded text-[10px] font-bold border transition-colors', isMatch ? 'bg-purple-600 text-white border-purple-500 shadow-md' : 'bg-stone-800 text-stone-400 border-stone-700 hover:bg-stone-700'];
+            };
+
+            const applyQuickModeToDay = (day) => {
+                if (adminQuickMode.value.length === 0) {
+                    delete msj_companion_schedule[day];
+                } else {
+                    msj_companion_schedule[day] = [...adminQuickMode.value];
+                }
+            };
+
+            const companionStats = computed(() => {
+                let counts = { A: 0, B: 0, C: 0 };
+                Object.values(msj_companion_schedule).forEach(slots => {
+                    slots.forEach(s => { if(counts[s] !== undefined) counts[s]++; });
+                });
+                return counts;
+            });
+
+            const adminOrderState = reactive({ isOpen: false, order: null });
+            const openAdminOrderModal = (o) => { adminOrderState.order = o; adminOrderState.isOpen = true; };
+
+            return {
+                msj_currentUser, currentView, showLoginModal, adminTab,
+                msj_courses, msj_orders, msj_companion_schedule,
+                login, logout,
+                
+                // Artisan Notes
+                articles, currentArticleIndex, viewingArticle, hasPremiumAccess,
+                nextCard, prevCard, startCarousel, pauseCarousel, openArticle,
+                
+                // Regular Course Calendar
+                selectedDay, selectDate, hasRegularCourse, coursesOnSelectedDay,
+                getCurrentCourseImg, nextCourseImg,
+                
+                // Companion Front-end
+                companionFilter, hasCompanionSlots, isDayMatchingFilter, isSlotMatchingFilter,
+                sortedCompanionDays, scrollToCompanionList, getSlotLabel, getSlotStyle,
+                
+                // Booking & Orders
+                myOrders, bookingState, openBookingModal, closeBookingModal, confirmBooking, goToMemberCenter,
+                
+                // Admin Companion
+                adminQuickMode, setAdminQuickMode, getQuickBtnClass, applyQuickModeToDay, companionStats,
+                adminOrderState, openAdminOrderModal
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
